@@ -45,20 +45,33 @@ def init_db():
 # ---------- HELPERS ----------
 def send_message(chat_id, text, silent=False):
     payload = {"chat_id": chat_id, "text": text, "disable_notification": silent}
-    r = requests.post(f"{API_URL}/sendMessage", json=payload).json()
-    if r.get("error_code") in [400, 403]:
-        remove_group(chat_id)
+    try:
+        r = requests.post(f"{API_URL}/sendMessage", json=payload).json()
+        if r.get("error_code") in [400, 403]:
+            remove_group(chat_id)
+    except Exception as e:
+        print("send_message error:", e)
 
 def delete_message(chat_id, message_id):
-    requests.post(f"{API_URL}/deleteMessage", json={"chat_id": chat_id, "message_id": message_id})
+    try:
+        requests.post(f"{API_URL}/deleteMessage", json={"chat_id": chat_id, "message_id": message_id})
+    except Exception as e:
+        print("delete_message error:", e)
 
-def get_user_bio(chat_id, user_id):
-    r = requests.get(f"{API_URL}/getChatMember?chat_id={chat_id}&user_id={user_id}").json()
-    return r.get("result", {}).get("user", {}).get("bio", "")
+def get_user_bio(user_id):
+    try:
+        r = requests.get(f"{API_URL}/getChat?chat_id={user_id}").json()
+        return r.get("result", {}).get("bio", "")
+    except Exception as e:
+        print("get_user_bio error:", e)
+        return ""
 
 def is_admin(chat_id, user_id):
-    r = requests.get(f"{API_URL}/getChatAdministrators?chat_id={chat_id}").json()
-    return any(admin["user"]["id"] == user_id for admin in r.get("result", []))
+    try:
+        r = requests.get(f"{API_URL}/getChatAdministrators?chat_id={chat_id}").json()
+        return any(admin["user"]["id"] == user_id for admin in r.get("result", []))
+    except:
+        return False
 
 def save_group(chat_id):
     with sqlite3.connect(DB_FILE) as conn:
@@ -127,13 +140,16 @@ def broadcast_message(msg):
         c.execute("SELECT chat_id FROM groups")
         for (chat_id,) in c.fetchall():
             payload = {"chat_id": chat_id, "disable_notification": True}
-            if "photo" in msg:
-                payload["photo"] = msg["photo"][-1]["file_id"]
-                payload["caption"] = msg.get("caption", "")
-                requests.post(f"{API_URL}/sendPhoto", json=payload)
-            else:
-                payload["text"] = msg.get("text", "")
-                requests.post(f"{API_URL}/sendMessage", json=payload)
+            try:
+                if "photo" in msg:
+                    payload["photo"] = msg["photo"][-1]["file_id"]
+                    payload["caption"] = msg.get("caption", "")
+                    requests.post(f"{API_URL}/sendPhoto", json=payload)
+                else:
+                    payload["text"] = msg.get("text", "")
+                    requests.post(f"{API_URL}/sendMessage", json=payload)
+            except Exception as e:
+                print(f"broadcast error to {chat_id}: {e}")
 
 # ---------- WEBHOOK ----------
 @app.route(f"/webhook/{WEBHOOK_SECRET}", methods=["POST"])
@@ -145,9 +161,14 @@ def webhook():
         chat = msg["chat"]
         chat_id = chat["id"]
         chat_type = chat["type"]
-        user_id = msg["from"]["id"]
+        user = msg["from"]
+        user_id = user["id"]
         message_id = msg["message_id"]
         text = msg.get("text", "")
+
+        # Ignore messages from other bots
+        if user.get("is_bot"):
+            return "ok"
 
         if text == "/start" and chat_type == "private":
             send_message(chat_id, WELCOME_TEXT)
@@ -160,10 +181,9 @@ def webhook():
         if chat_type in ["group", "supergroup"]:
             save_group(chat_id)
 
-        if "left_chat_member" in msg:
-            if msg["left_chat_member"]["id"] == BOT_ID:
-                remove_group(chat_id)
-                return "ok"
+        if "left_chat_member" in msg and msg["left_chat_member"]["id"] == BOT_ID:
+            remove_group(chat_id)
+            return "ok"
 
         if "new_chat_members" in msg:
             send_message(chat_id, WELCOME_TEXT)
@@ -196,7 +216,7 @@ def webhook():
             return "ok"
 
         if chat_type in ["group", "supergroup"] and not is_admin(chat_id, user_id):
-            bio = get_user_bio(chat_id, user_id)
+            bio = get_user_bio(user_id)
             if any(link in bio.lower() for link in ["http://", "https://", "t.me", "@"]):
                 delete_message(chat_id, message_id)
                 count = increment_warning(user_id, chat_id)
