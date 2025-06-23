@@ -155,7 +155,7 @@ def webhook():
             send_message(chat_id, WELCOME_TEXT)
             return "ok"
 
-        if chat_type == "private" and text.startswith("/") and text != "/start":
+        if chat_type == "private" and text.startswith("/") and not text.startswith("/venybio") and text != "/start":
             send_message(chat_id, "❌ Give command in groups")
             return "ok"
 
@@ -189,7 +189,7 @@ def webhook():
                 send_message(chat_id, "❌ BanBio disabled")
                 return "ok"
 
-        if chat_type == "private" and text == "/venybio":
+        if chat_type == "private" and text.startswith("/venybio"):
             if "reply_to_message" in msg:
                 broadcast_message(msg["reply_to_message"])
                 send_message(chat_id, "📢 Broadcast sent to all groups", silent=True)
