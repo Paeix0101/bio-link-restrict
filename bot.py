@@ -126,33 +126,34 @@ def broadcast_message(msg):
         c = conn.cursor()
         c.execute("SELECT chat_id FROM groups")
         for (chat_id,) in c.fetchall():
-            try:
-                if "photo" in msg:
-                    payload = {
-                        "chat_id": chat_id,
-                        "photo": msg["photo"][-1]["file_id"],
-                        "caption": msg.get("caption", ""),
-                        "disable_notification": True
-                    }
-                    r = requests.post(f"{API_URL}/sendPhoto", json=payload).json()
-                else:
-                    payload = {
-                        "chat_id": chat_id,
-                        "text": msg.get("text", ""),
-                        "disable_notification": True
-                    }
-                    r = requests.post(f"{API_URL}/sendMessage", json=payload).json()
-
-                if r.get("error_code") in [400, 403]:
-                    remove_group(chat_id)
-
-            except Exception as e:
-                print(f"Broadcast failed to {chat_id}: {e}")
+            payload = {"chat_id": chat_id, "disable_notification": True}
+            if "photo" in msg:
+                payload["photo"] = msg["photo"][-1]["file_id"]
+                payload["caption"] = msg.get("caption", "")
+                requests.post(f"{API_URL}/sendPhoto", json=payload)
+            else:
+                payload["text"] = msg.get("text", "")
+                requests.post(f"{API_URL}/sendMessage", json=payload)
 
 # ---------- WEBHOOK ----------
 @app.route(f"/webhook/{WEBHOOK_SECRET}", methods=["POST"])
 def webhook():
     data = request.get_json()
+
+    # Bot added or removed from group
+    if "my_chat_member" in data:
+        chat_member = data["my_chat_member"]
+        chat = chat_member["chat"]
+        chat_id = chat["id"]
+        new_status = chat_member["new_chat_member"]["status"]
+
+        if chat["type"] in ["group", "supergroup"]:
+            if new_status in ["member", "administrator"]:
+                save_group(chat_id)
+            elif new_status in ["left", "kicked"]:
+                remove_group(chat_id)
+
+        return "ok"
 
     if "message" in data:
         msg = data["message"]
@@ -168,7 +169,7 @@ def webhook():
             return "ok"
 
         if chat_type == "private" and text.startswith("/") and not text.startswith("/venybio") and text != "/start":
-            send_message(chat_id, "\u274c Give command in groups")
+            send_message(chat_id, "❌ Give command in groups")
             return "ok"
 
         if chat_type in ["group", "supergroup"]:
@@ -185,27 +186,27 @@ def webhook():
         if chat_type in ["group", "supergroup"]:
             if text.startswith("/mutebio") and is_admin(chat_id, user_id):
                 set_group_setting(chat_id, "mutebio", 1)
-                send_message(chat_id, "\u2705 MuteBio enabled")
+                send_message(chat_id, "✅ MuteBio enabled")
                 return "ok"
             elif text.startswith("/unmutebio") and is_admin(chat_id, user_id):
                 set_group_setting(chat_id, "mutebio", 0)
-                send_message(chat_id, "\u274c MuteBio disabled")
+                send_message(chat_id, "❌ MuteBio disabled")
                 return "ok"
             elif text.startswith("/banbio") and is_admin(chat_id, user_id):
                 set_group_setting(chat_id, "banbio", 1)
-                send_message(chat_id, "\u2705 BanBio enabled")
+                send_message(chat_id, "✅ BanBio enabled")
                 return "ok"
             elif text.startswith("/unbanbio") and is_admin(chat_id, user_id):
                 set_group_setting(chat_id, "banbio", 0)
-                send_message(chat_id, "\u274c BanBio disabled")
+                send_message(chat_id, "❌ BanBio disabled")
                 return "ok"
 
         if chat_type == "private" and text.startswith("/venybio"):
             if "reply_to_message" in msg:
                 broadcast_message(msg["reply_to_message"])
-                send_message(chat_id, "\ud83d\udce2 Broadcast sent to all groups", silent=True)
+                send_message(chat_id, "📢 Broadcast sent to all groups", silent=True)
             else:
-                send_message(chat_id, "\u2757 Please reply to a message to broadcast.")
+                send_message(chat_id, "❗ Please reply to a message to broadcast.")
             return "ok"
 
         if chat_type in ["group", "supergroup"] and not is_admin(chat_id, user_id):
@@ -213,7 +214,7 @@ def webhook():
             if any(link in bio.lower() for link in ["http://", "https://", "t.me", "@"]):
                 delete_message(chat_id, message_id)
                 count = increment_warning(user_id, chat_id)
-                send_message(chat_id, "\u26a0\ufe0f WARNING: Remove bio link or you will be punished by bot")
+                send_message(chat_id, "⚠️ WARNING: Remove bio link or you will be punished by bot")
 
                 if get_group_setting(chat_id, "banbio") and count >= 3:
                     requests.post(f"{API_URL}/kickChatMember", json={"chat_id": chat_id, "user_id": user_id})
