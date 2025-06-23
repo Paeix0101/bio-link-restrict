@@ -144,54 +144,74 @@ def webhook():
 
     if "message" in data:
         msg = data["message"]
-        chat_id = msg["chat"]["id"]
+        chat = msg["chat"]
+        chat_id = chat["id"]
+        chat_type = chat["type"]
         user_id = msg["from"]["id"]
         message_id = msg["message_id"]
         text = msg.get("text", "")
 
-        if msg["chat"]["type"] in ["group", "supergroup"]:
-            save_group(chat_id)
-
-        if "new_chat_members" in msg:
+        if text == "/start" and chat_type == "private":
             send_message(chat_id, WELCOME_TEXT)
+            return "ok"
+
+        if chat_type == "private" and text.startswith("/") and text != "/start":
+            send_message(chat_id, "❌ Give command in groups")
+            return "ok"
+
+        if chat_type in ["group", "supergroup"]:
+            save_group(chat_id)
 
         if "left_chat_member" in msg:
             if msg["left_chat_member"]["id"] == BOT_ID:
                 remove_group(chat_id)
                 return "ok"
 
-        if text.startswith("/mutebio") and is_admin(chat_id, user_id):
-            set_group_setting(chat_id, "mutebio", 1)
-            send_message(chat_id, "✅ MuteBio enabled")
-        elif text.startswith("/unmutebio") and is_admin(chat_id, user_id):
-            set_group_setting(chat_id, "mutebio", 0)
-            send_message(chat_id, "❌ MuteBio disabled")
-        elif text.startswith("/banbio") and is_admin(chat_id, user_id):
-            set_group_setting(chat_id, "banbio", 1)
-            send_message(chat_id, "✅ BanBio enabled")
-        elif text.startswith("/unbanbio") and is_admin(chat_id, user_id):
-            set_group_setting(chat_id, "banbio", 0)
-            send_message(chat_id, "❌ BanBio disabled")
+        if "new_chat_members" in msg:
+            send_message(chat_id, WELCOME_TEXT)
+            return "ok"
 
-        elif text.startswith("/venybio") and msg.get("reply_to_message"):
-            broadcast_message(msg["reply_to_message"])
+        if chat_type in ["group", "supergroup"]:
+            if text.startswith("/mutebio") and is_admin(chat_id, user_id):
+                set_group_setting(chat_id, "mutebio", 1)
+                send_message(chat_id, "✅ MuteBio enabled")
+                return "ok"
+            elif text.startswith("/unmutebio") and is_admin(chat_id, user_id):
+                set_group_setting(chat_id, "mutebio", 0)
+                send_message(chat_id, "❌ MuteBio disabled")
+                return "ok"
+            elif text.startswith("/banbio") and is_admin(chat_id, user_id):
+                set_group_setting(chat_id, "banbio", 1)
+                send_message(chat_id, "✅ BanBio enabled")
+                return "ok"
+            elif text.startswith("/unbanbio") and is_admin(chat_id, user_id):
+                set_group_setting(chat_id, "banbio", 0)
+                send_message(chat_id, "❌ BanBio disabled")
+                return "ok"
 
-        else:
-            if not is_admin(chat_id, user_id):
-                bio = get_user_bio(user_id)
-                if any(link in bio.lower() for link in ["http://", "https://", "t.me", "@"]):
-                    delete_message(chat_id, message_id)
-                    count = increment_warning(user_id, chat_id)
-                    send_message(chat_id, "⚠️ WARNING: Remove bio link or you will be punished by bot")
+        if chat_type == "private" and text == "/venybio":
+            if "reply_to_message" in msg:
+                broadcast_message(msg["reply_to_message"])
+                send_message(chat_id, "📢 Broadcast sent to all groups", silent=True)
+            else:
+                send_message(chat_id, "❗ Please reply to a message to broadcast.")
+            return "ok"
 
-                    if get_group_setting(chat_id, "banbio") and count >= 3:
-                        requests.post(f"{API_URL}/kickChatMember", json={"chat_id": chat_id, "user_id": user_id})
-                    elif get_group_setting(chat_id, "mutebio") and count >= 3:
-                        requests.post(f"{API_URL}/restrictChatMember", json={
-                            "chat_id": chat_id,
-                            "user_id": user_id,
-                            "permissions": {"can_send_messages": False}
-                        })
+        if chat_type in ["group", "supergroup"] and not is_admin(chat_id, user_id):
+            bio = get_user_bio(user_id)
+            if any(link in bio.lower() for link in ["http://", "https://", "t.me", "@"]):
+                delete_message(chat_id, message_id)
+                count = increment_warning(user_id, chat_id)
+                send_message(chat_id, "⚠️ WARNING: Remove bio link or you will be punished by bot")
+
+                if get_group_setting(chat_id, "banbio") and count >= 3:
+                    requests.post(f"{API_URL}/kickChatMember", json={"chat_id": chat_id, "user_id": user_id})
+                elif get_group_setting(chat_id, "mutebio") and count >= 3:
+                    requests.post(f"{API_URL}/restrictChatMember", json={
+                        "chat_id": chat_id,
+                        "user_id": user_id,
+                        "permissions": {"can_send_messages": False}
+                    })
 
     return "ok"
 
