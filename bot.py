@@ -138,14 +138,23 @@ def reset_warning(user_id, chat_id):
         c = conn.cursor()
         c.execute("DELETE FROM warnings WHERE user_id=? AND chat_id=?", (user_id, chat_id))
         conn.commit()
+    try:
         requests.post(f"{API_URL}/restrictChatMember", json={
             "chat_id": chat_id,
             "user_id": user_id,
-            "permissions": {"can_send_messages": True, "can_send_media_messages": True,
-                             "can_send_polls": True, "can_send_other_messages": True,
-                             "can_add_web_page_previews": True, "can_change_info": False,
-                             "can_invite_users": True, "can_pin_messages": False}
+            "permissions": {
+                "can_send_messages": True,
+                "can_send_media_messages": True,
+                "can_send_polls": True,
+                "can_send_other_messages": True,
+                "can_add_web_page_previews": True,
+                "can_change_info": False,
+                "can_invite_users": True,
+                "can_pin_messages": False
+            }
         })
+    except Exception as e:
+        print("unrestrict error:", e)
 
 def reset_all_warnings(chat_id):
     with sqlite3.connect(DB_FILE) as conn:
@@ -237,9 +246,9 @@ def webhook():
                 elif len(parts) > 1:
                     uname = parts[1].lstrip("@")
                     try:
-                        r = requests.get(f"{API_URL}/getChat?chat_id=@{uname}").json()
+                        r = requests.get(f"{API_URL}/getChatMember?chat_id={chat_id}&user_id=@{uname}").json()
                         if r.get("ok"):
-                            target_id = r["result"]["id"]
+                            target_id = r["result"]["user"]["id"]
                     except:
                         try:
                             target_id = int(parts[1])
@@ -271,6 +280,7 @@ def webhook():
                         "user_id": user_id,
                         "permissions": {"can_send_messages": False}
                     })
+
     return "ok"
 
 # ---------- RUN ----------
@@ -278,3 +288,4 @@ if __name__ == "__main__":
     init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
