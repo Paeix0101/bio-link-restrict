@@ -244,16 +244,16 @@ def webhook():
                 if "reply_to_message" in msg:
                     target_id = msg["reply_to_message"]["from"]["id"]
                 elif len(parts) > 1:
-                    uname = parts[1]
+                    uname = parts[1].lstrip("@")
                     try:
-                        if uname.startswith("@"):  # username case
-                            r = requests.get(f"{API_URL}/getChat?chat_id={uname}").json()
-                            if r.get("ok"):
-                                target_id = r["result"]["id"]
-                        else:
-                            target_id = int(uname)
+                        r = requests.get(f"{API_URL}/getChat?chat_id=@{uname}").json()
+                        if r.get("ok"):
+                            target_id = r["result"]["id"]
                     except:
-                        pass
+                        try:
+                            target_id = int(parts[1])
+                        except:
+                            pass
                 if target_id:
                     reset_warning(target_id, chat_id)
                     send_message(chat_id, f"✅ Bio warnings reset for user ID {target_id}")
