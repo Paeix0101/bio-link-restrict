@@ -166,7 +166,6 @@ def webhook():
         message_id = msg["message_id"]
         text = msg.get("text", "")
 
-        # Ignore messages from other bots
         if user.get("is_bot"):
             return "ok"
 
@@ -185,9 +184,10 @@ def webhook():
             remove_group(chat_id)
             return "ok"
 
-        if "new_chat_members" in msg:
-            send_message(chat_id, WELCOME_TEXT)
-            return "ok"
+        # Removed welcome message on new member join
+        # if "new_chat_members" in msg:
+        #     send_message(chat_id, WELCOME_TEXT)
+        #     return "ok"
 
         if chat_type in ["group", "supergroup"]:
             if text.startswith("/mutebio") and is_admin(chat_id, user_id):
