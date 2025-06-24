@@ -11,7 +11,7 @@ API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 BOT_ID = int(requests.get(f"{API_URL}/getMe").json()["result"]["id"])
 
 DB_FILE = "data.db"
-WARNING_EXPIRY_SECONDS = 12 * 60 * 60  # 12 hours
+WARNING_EXPIRY_SECONDS = 12 * 60 * 60
 WELCOME_TEXT = (
     "This bot will delete message of bio link members\n"
     "COMMANDS :-\n"
@@ -86,18 +86,18 @@ def save_group(chat_id):
         c.execute("INSERT OR IGNORE INTO group_settings (chat_id) VALUES (?)", (chat_id,))
         conn.commit()
 
+def save_user(user_id):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+        conn.commit()
+
 def remove_group(chat_id):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("DELETE FROM groups WHERE chat_id=?", (chat_id,))
         c.execute("DELETE FROM group_settings WHERE chat_id=?", (chat_id,))
         c.execute("DELETE FROM warnings WHERE chat_id=?", (chat_id,))
-        conn.commit()
-
-def save_user(user_id):
-    with sqlite3.connect(DB_FILE) as conn:
-        c = conn.cursor()
-        c.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
         conn.commit()
 
 def clean_old_warnings():
@@ -138,6 +138,14 @@ def reset_warning(user_id, chat_id):
         c = conn.cursor()
         c.execute("DELETE FROM warnings WHERE user_id=? AND chat_id=?", (user_id, chat_id))
         conn.commit()
+        requests.post(f"{API_URL}/restrictChatMember", json={
+            "chat_id": chat_id,
+            "user_id": user_id,
+            "permissions": {"can_send_messages": True, "can_send_media_messages": True,
+                             "can_send_polls": True, "can_send_other_messages": True,
+                             "can_add_web_page_previews": True, "can_change_info": False,
+                             "can_invite_users": True, "can_pin_messages": False}
+        })
 
 def reset_all_warnings(chat_id):
     with sqlite3.connect(DB_FILE) as conn:
@@ -179,7 +187,6 @@ def broadcast_private(msg):
 @app.route(f"/webhook/{WEBHOOK_SECRET}", methods=["POST"])
 def webhook():
     data = request.get_json()
-
     if "message" in data:
         msg = data["message"]
         chat = msg["chat"]
@@ -209,19 +216,15 @@ def webhook():
         if text.startswith("/mutebio") and is_admin(chat_id, user_id):
             set_group_setting(chat_id, "mutebio", 1)
             send_message(chat_id, "✅ MuteBio enabled")
-            return "ok"
         elif text.startswith("/unmutebio") and is_admin(chat_id, user_id):
             set_group_setting(chat_id, "mutebio", 0)
             send_message(chat_id, "❌ MuteBio disabled")
-            return "ok"
         elif text.startswith("/banbio") and is_admin(chat_id, user_id):
             set_group_setting(chat_id, "banbio", 1)
             send_message(chat_id, "✅ BanBio enabled")
-            return "ok"
         elif text.startswith("/unbanbio") and is_admin(chat_id, user_id):
             set_group_setting(chat_id, "banbio", 0)
             send_message(chat_id, "❌ BanBio disabled")
-            return "ok"
         elif text.startswith("/resetbio") and is_admin(chat_id, user_id):
             parts = text.split()
             if len(parts) > 1 and parts[1].lower() == "all":
@@ -247,17 +250,13 @@ def webhook():
                     send_message(chat_id, f"✅ Bio warnings reset for user ID {target_id}")
                 else:
                     send_message(chat_id, "❗ Could not find user to reset warnings.")
-            return "ok"
-
         elif text.startswith("/venyriyu") and chat_type == "private":
             if "reply_to_message" in msg:
                 broadcast_private(msg["reply_to_message"])
                 send_message(chat_id, "✅ Message broadcasted to all users")
             else:
                 send_message(chat_id, "❗ Please reply to a message to broadcast.")
-            return "ok"
-
-        if chat_type in ["group", "supergroup"] and not is_admin(chat_id, user_id):
+        elif chat_type in ["group", "supergroup"] and not is_admin(chat_id, user_id):
             bio = get_user_bio(user_id)
             if any(link in bio.lower() for link in ["http://", "https://", "t.me", "@"]):
                 delete_message(chat_id, message_id)
@@ -272,7 +271,6 @@ def webhook():
                         "user_id": user_id,
                         "permissions": {"can_send_messages": False}
                     })
-
     return "ok"
 
 # ---------- RUN ----------
