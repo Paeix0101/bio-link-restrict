@@ -13,12 +13,12 @@ BOT_ID = int(requests.get(f"{API_URL}/getMe").json()["result"]["id"])
 DB_FILE = "data.db"
 WARNING_EXPIRY_SECONDS = 12 * 60 * 60  # 12 hours
 WELCOME_TEXT = (
-    "This bot will delete messages from users who have links in their bio.\n"
-    "COMMANDS:\n"
-    "/mutebio - Mute users with bio links after 3 warnings\n"
-    "/unmutebio - Stop muting users\n"
-    "/banbio - Ban users with bio links after 3 warnings\n"
-    "/unbanbio - Stop banning users"
+    "This bot will delete message of bio link members\n"
+    "COMMANDS :-\n"
+    "/mutebio - send this command for mute members have bio link after 3 warnings\n"
+    "/unmutebio - send this command to end mutebio command\n"
+    "/banbio - send this command for ban members have bio link after 3 warnings\n"
+    "/unbanbio - send this command to end banbio command"
 )
 
 # ---------- DATABASE ----------
@@ -61,7 +61,7 @@ def delete_message(chat_id, message_id):
 def get_user_bio(user_id):
     try:
         r = requests.get(f"{API_URL}/getChat?chat_id={user_id}").json()
-        return r.get("result", {}).get("bio", "") or ""
+        return r.get("result", {}).get("bio", "")
     except Exception as e:
         print("get_user_bio error:", e)
         return ""
@@ -72,10 +72,6 @@ def is_admin(chat_id, user_id):
         return any(admin["user"]["id"] == user_id for admin in r.get("result", []))
     except:
         return False
-
-def has_bio_link(bio_text):
-    bio_text = bio_text.lower()
-    return any(link in bio_text for link in ["http://", "https://", "t.me", "@"])
 
 def save_group(chat_id):
     with sqlite3.connect(DB_FILE) as conn:
@@ -177,7 +173,7 @@ def webhook():
             send_message(chat_id, WELCOME_TEXT)
             return "ok"
 
-        if chat_type == "private" and text.startswith("/") and not text.startswith("/venybio"):
+        if chat_type == "private" and text.startswith("/") and not text.startswith("/venybio") and text != "/start":
             send_message(chat_id, "❌ Give command in groups")
             return "ok"
 
@@ -188,7 +184,7 @@ def webhook():
             remove_group(chat_id)
             return "ok"
 
-        if text:
+        if chat_type in ["group", "supergroup"]:
             if text.startswith("/mutebio") and is_admin(chat_id, user_id):
                 set_group_setting(chat_id, "mutebio", 1)
                 send_message(chat_id, "✅ MuteBio enabled")
@@ -214,13 +210,15 @@ def webhook():
                 send_message(chat_id, "❗ Please reply to a message to broadcast.")
             return "ok"
 
-        # ---------- BIO CHECK ON EVERY MESSAGE ----------
         if chat_type in ["group", "supergroup"] and not is_admin(chat_id, user_id):
             bio = get_user_bio(user_id)
-            if has_bio_link(bio):
+            if any(link in bio.lower() for link in ["http://", "https://", "t.me", "@"]):
                 delete_message(chat_id, message_id)
                 count = increment_warning(user_id, chat_id)
-                send_message(chat_id, f"⚠️ WARNING {count}/3: Remove bio link or you will be punished")
+                send_message(
+                    chat_id,
+                    f"⚠️ WARNING: Remove bio link \nAnd RESTART your telegram \nor you will be punished by bot"
+                )
 
                 if get_group_setting(chat_id, "banbio") and count >= 3:
                     requests.post(f"{API_URL}/kickChatMember", json={"chat_id": chat_id, "user_id": user_id})
