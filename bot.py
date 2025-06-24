@@ -15,10 +15,13 @@ WARNING_EXPIRY_SECONDS = 12 * 60 * 60  # 12 hours
 WELCOME_TEXT = (
     "This bot will delete message of bio link members\n"
     "COMMANDS :-\n"
+    "/start - send this command to see all features and command details\n"
     "/mutebio - send this command for mute members have bio link after 3 warnings\n"
     "/unmutebio - send this command to end mutebio command\n"
     "/banbio - send this command for ban members have bio link after 3 warnings\n"
-    "/unbanbio - send this command to end banbio command"
+    "/unbanbio - send this command to end banbio command\n"
+    "/resetbio all - reset warnings and punishment for all members.\n"
+    "/resetbio ( reply to message , user name , user id ) - use this command for remove message for particular member"
 )
 
 # ---------- DATABASE ----------
@@ -39,6 +42,9 @@ def init_db():
                     )''')
         c.execute('''CREATE TABLE IF NOT EXISTS groups (
                         chat_id INTEGER PRIMARY KEY
+                    )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS users (
+                        user_id INTEGER PRIMARY KEY
                     )''')
         conn.commit()
 
@@ -88,6 +94,12 @@ def remove_group(chat_id):
         c.execute("DELETE FROM warnings WHERE chat_id=?", (chat_id,))
         conn.commit()
 
+def save_user(user_id):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+        conn.commit()
+
 def clean_old_warnings():
     now = int(time.time())
     with sqlite3.connect(DB_FILE) as conn:
@@ -121,6 +133,18 @@ def increment_warning(user_id, chat_id):
         conn.commit()
     return count
 
+def reset_warning(user_id, chat_id):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM warnings WHERE user_id=? AND chat_id=?", (user_id, chat_id))
+        conn.commit()
+
+def reset_all_warnings(chat_id):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM warnings WHERE chat_id=?", (chat_id,))
+        conn.commit()
+
 def get_group_setting(chat_id, key):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
@@ -134,12 +158,12 @@ def set_group_setting(chat_id, key, value):
         c.execute(f"UPDATE group_settings SET {key}=? WHERE chat_id=?", (value, chat_id))
         conn.commit()
 
-def broadcast_message(msg):
+def broadcast_private(msg):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
-        c.execute("SELECT chat_id FROM groups")
-        for (chat_id,) in c.fetchall():
-            payload = {"chat_id": chat_id, "disable_notification": True}
+        c.execute("SELECT user_id FROM users")
+        for (user_id,) in c.fetchall():
+            payload = {"chat_id": user_id, "disable_notification": True}
             try:
                 if "photo" in msg:
                     payload["photo"] = msg["photo"][-1]["file_id"]
@@ -149,7 +173,7 @@ def broadcast_message(msg):
                     payload["text"] = msg.get("text", "")
                     requests.post(f"{API_URL}/sendMessage", json=payload)
             except Exception as e:
-                print(f"broadcast error to {chat_id}: {e}")
+                print(f"broadcast_private error to {user_id}: {e}")
 
 # ---------- WEBHOOK ----------
 @app.route(f"/webhook/{WEBHOOK_SECRET}", methods=["POST"])
@@ -169,13 +193,11 @@ def webhook():
         if user.get("is_bot"):
             return "ok"
 
-        if text == "/start" and chat_type == "private":
-            send_message(chat_id, WELCOME_TEXT)
-            return "ok"
-
-        if chat_type == "private" and text.startswith("/") and not text.startswith("/venybio") and text != "/start":
-            send_message(chat_id, "❌ Give command in groups")
-            return "ok"
+        if chat_type == "private":
+            save_user(user_id)
+            if text == "/start":
+                send_message(chat_id, WELCOME_TEXT)
+                return "ok"
 
         if chat_type in ["group", "supergroup"]:
             save_group(chat_id)
@@ -184,28 +206,53 @@ def webhook():
             remove_group(chat_id)
             return "ok"
 
-        if chat_type in ["group", "supergroup"]:
-            if text.startswith("/mutebio") and is_admin(chat_id, user_id):
-                set_group_setting(chat_id, "mutebio", 1)
-                send_message(chat_id, "✅ MuteBio enabled")
-                return "ok"
-            elif text.startswith("/unmutebio") and is_admin(chat_id, user_id):
-                set_group_setting(chat_id, "mutebio", 0)
-                send_message(chat_id, "❌ MuteBio disabled")
-                return "ok"
-            elif text.startswith("/banbio") and is_admin(chat_id, user_id):
-                set_group_setting(chat_id, "banbio", 1)
-                send_message(chat_id, "✅ BanBio enabled")
-                return "ok"
-            elif text.startswith("/unbanbio") and is_admin(chat_id, user_id):
-                set_group_setting(chat_id, "banbio", 0)
-                send_message(chat_id, "❌ BanBio disabled")
-                return "ok"
+        if text.startswith("/mutebio") and is_admin(chat_id, user_id):
+            set_group_setting(chat_id, "mutebio", 1)
+            send_message(chat_id, "✅ MuteBio enabled")
+            return "ok"
+        elif text.startswith("/unmutebio") and is_admin(chat_id, user_id):
+            set_group_setting(chat_id, "mutebio", 0)
+            send_message(chat_id, "❌ MuteBio disabled")
+            return "ok"
+        elif text.startswith("/banbio") and is_admin(chat_id, user_id):
+            set_group_setting(chat_id, "banbio", 1)
+            send_message(chat_id, "✅ BanBio enabled")
+            return "ok"
+        elif text.startswith("/unbanbio") and is_admin(chat_id, user_id):
+            set_group_setting(chat_id, "banbio", 0)
+            send_message(chat_id, "❌ BanBio disabled")
+            return "ok"
+        elif text.startswith("/resetbio") and is_admin(chat_id, user_id):
+            parts = text.split()
+            if len(parts) > 1 and parts[1].lower() == "all":
+                reset_all_warnings(chat_id)
+                send_message(chat_id, "✅ All warnings and punishments have been reset.")
+            else:
+                target_id = None
+                if "reply_to_message" in msg:
+                    target_id = msg["reply_to_message"]["from"]["id"]
+                elif len(parts) > 1:
+                    uname = parts[1].lstrip("@")
+                    try:
+                        r = requests.get(f"{API_URL}/getChat?chat_id=@{uname}").json()
+                        if r.get("ok"):
+                            target_id = r["result"]["id"]
+                    except:
+                        try:
+                            target_id = int(parts[1])
+                        except:
+                            pass
+                if target_id:
+                    reset_warning(target_id, chat_id)
+                    send_message(chat_id, f"✅ Bio warnings reset for user ID {target_id}")
+                else:
+                    send_message(chat_id, "❗ Could not find user to reset warnings.")
+            return "ok"
 
-        if chat_type == "private" and text.startswith("/venybio"):
+        elif text.startswith("/venyriyu") and chat_type == "private":
             if "reply_to_message" in msg:
-                broadcast_message(msg["reply_to_message"])
-                send_message(chat_id, "📢 Broadcast sent to all groups", silent=True)
+                broadcast_private(msg["reply_to_message"])
+                send_message(chat_id, "✅ Message broadcasted to all users")
             else:
                 send_message(chat_id, "❗ Please reply to a message to broadcast.")
             return "ok"
@@ -215,10 +262,7 @@ def webhook():
             if any(link in bio.lower() for link in ["http://", "https://", "t.me", "@"]):
                 delete_message(chat_id, message_id)
                 count = increment_warning(user_id, chat_id)
-                send_message(
-                    chat_id,
-                    f"⚠️ WARNING: Remove bio link \nAnd RESTART your telegram \nor you will be punished by bot"
-                )
+                send_message(chat_id, f"⚠️ WARNING {count}/3: Remove bio link\nAnd RESTART your telegram\nor you will be punished by bot")
 
                 if get_group_setting(chat_id, "banbio") and count >= 3:
                     requests.post(f"{API_URL}/kickChatMember", json={"chat_id": chat_id, "user_id": user_id})
