@@ -61,7 +61,7 @@ def delete_message(chat_id, message_id):
 def get_user_bio(user_id):
     try:
         r = requests.get(f"{API_URL}/getChat?chat_id={user_id}").json()
-        return r.get("result", {}).get("bio", "")
+        return r.get("result", {}).get("bio", "") or ""
     except Exception as e:
         print("get_user_bio error:", e)
         return ""
@@ -72,6 +72,10 @@ def is_admin(chat_id, user_id):
         return any(admin["user"]["id"] == user_id for admin in r.get("result", []))
     except:
         return False
+
+def has_bio_link(bio_text):
+    bio_text = bio_text.lower()
+    return any(link in bio_text for link in ["http://", "https://", "t.me", "@"])
 
 def save_group(chat_id):
     with sqlite3.connect(DB_FILE) as conn:
@@ -173,7 +177,7 @@ def webhook():
             send_message(chat_id, WELCOME_TEXT)
             return "ok"
 
-        if chat_type == "private" and text.startswith("/") and not text.startswith("/venybio") and text != "/start":
+        if chat_type == "private" and text.startswith("/") and not text.startswith("/venybio"):
             send_message(chat_id, "❌ Give command in groups")
             return "ok"
 
@@ -184,7 +188,7 @@ def webhook():
             remove_group(chat_id)
             return "ok"
 
-        if chat_type in ["group", "supergroup"]:
+        if text:
             if text.startswith("/mutebio") and is_admin(chat_id, user_id):
                 set_group_setting(chat_id, "mutebio", 1)
                 send_message(chat_id, "✅ MuteBio enabled")
@@ -210,10 +214,10 @@ def webhook():
                 send_message(chat_id, "❗ Please reply to a message to broadcast.")
             return "ok"
 
-        # ---------- INSTANT BIO CHECK ON EVERY MESSAGE ----------
+        # ---------- BIO CHECK ON EVERY MESSAGE ----------
         if chat_type in ["group", "supergroup"] and not is_admin(chat_id, user_id):
             bio = get_user_bio(user_id)
-            if any(link in bio.lower() for link in ["http://", "https://", "t.me", "@"]):
+            if has_bio_link(bio):
                 delete_message(chat_id, message_id)
                 count = increment_warning(user_id, chat_id)
                 send_message(chat_id, f"⚠️ WARNING {count}/3: Remove bio link or you will be punished")
