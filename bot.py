@@ -13,15 +13,14 @@ BOT_ID = int(requests.get(f"{API_URL}/getMe").json()["result"]["id"])
 DB_FILE = "data.db"
 WARNING_EXPIRY_SECONDS = 12 * 60 * 60
 WELCOME_TEXT = (
-    "This bot will delete message of bio link members\n"
-    "COMMANDS :-\n"
+    "FREE BIO HUNT\n"
     "/start - send this command to see all features and command details\n"
     "/mutebio - send this command for mute members have bio link after 3 warnings\n"
     "/unmutebio - send this command to end mutebio command\n"
     "/banbio - send this command for ban members have bio link after 3 warnings\n"
     "/unbanbio - send this command to end banbio command\n"
     "/resetbio all - reset warnings and punishment for all members.\n"
-    "/resetbio ( reply to message , user name , user id ) - use this command for remove message for particular member"
+    "/resetbio ( reply to message , user name ) - use this command for remove message for particular member"
 )
 
 # ---------- DATABASE ----------
@@ -159,8 +158,12 @@ def reset_warning(user_id, chat_id):
 def reset_all_warnings(chat_id):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
+        c.execute("SELECT user_id FROM warnings WHERE chat_id=?", (chat_id,))
+        users = c.fetchall()
         c.execute("DELETE FROM warnings WHERE chat_id=?", (chat_id,))
         conn.commit()
+    for (user_id,) in users:
+        reset_warning(user_id, chat_id)
 
 def get_group_setting(chat_id, key):
     with sqlite3.connect(DB_FILE) as conn:
@@ -209,11 +212,13 @@ def webhook():
         if user.get("is_bot"):
             return "ok"
 
-        if chat_type == "private":
-            save_user(user_id)
+        if chat_type == "private" or (chat_type in ["group", "supergroup"] and is_admin(chat_id, user_id)):
             if text == "/start":
                 send_message(chat_id, WELCOME_TEXT)
                 return "ok"
+
+        if chat_type == "private":
+            save_user(user_id)
 
         if chat_type in ["group", "supergroup"]:
             save_group(chat_id)
@@ -238,7 +243,7 @@ def webhook():
             parts = text.split()
             if len(parts) > 1 and parts[1].lower() == "all":
                 reset_all_warnings(chat_id)
-                send_message(chat_id, "✅ All warnings and punishments have been reset.")
+                send_message(chat_id, "✅ All warnings and restrictions have been reset.")
             else:
                 target_id = None
                 if "reply_to_message" in msg:
@@ -270,7 +275,7 @@ def webhook():
             if any(link in bio.lower() for link in ["http://", "https://", "t.me", "@"]):
                 delete_message(chat_id, message_id)
                 count = increment_warning(user_id, chat_id)
-                send_message(chat_id, f"⚠️ WARNING {count}/3: Remove bio link\nAnd RESTART your telegram\nor you will be punished by bot")
+                send_message(chat_id, f"⚠️ WARNING {count}/3: Remove bio link\n or you will be punished by bot")
 
                 if get_group_setting(chat_id, "banbio") and count >= 3:
                     requests.post(f"{API_URL}/kickChatMember", json={"chat_id": chat_id, "user_id": user_id})
