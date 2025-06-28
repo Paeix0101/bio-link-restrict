@@ -178,22 +178,26 @@ def set_group_setting(chat_id, key, value):
         c.execute(f"UPDATE group_settings SET {key}=? WHERE chat_id=?", (value, chat_id))
         conn.commit()
 
-def broadcast_private(msg):
+def broadcast_private_and_groups(msg):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("SELECT user_id FROM users")
-        for (user_id,) in c.fetchall():
-            payload = {"chat_id": user_id, "disable_notification": True}
-            try:
-                if "photo" in msg:
-                    payload["photo"] = msg["photo"][-1]["file_id"]
-                    payload["caption"] = msg.get("caption", "")
-                    requests.post(f"{API_URL}/sendPhoto", json=payload)
-                else:
-                    payload["text"] = msg.get("text", "")
-                    requests.post(f"{API_URL}/sendMessage", json=payload)
-            except Exception as e:
-                print(f"broadcast_private error to {user_id}: {e}")
+        users = [row[0] for row in c.fetchall()]
+        c.execute("SELECT chat_id FROM groups")
+        groups = [row[0] for row in c.fetchall()]
+
+    for recipient_id in users + groups:
+        payload = {"chat_id": recipient_id, "disable_notification": True}
+        try:
+            if "photo" in msg:
+                payload["photo"] = msg["photo"][-1]["file_id"]
+                payload["caption"] = msg.get("caption", "")
+                requests.post(f"{API_URL}/sendPhoto", json=payload)
+            else:
+                payload["text"] = msg.get("text", "")
+                requests.post(f"{API_URL}/sendMessage", json=payload)
+        except Exception as e:
+            print(f"broadcast error to {recipient_id}: {e}")
 
 # ---------- WEBHOOK ----------
 @app.route(f"/webhook/{WEBHOOK_SECRET}", methods=["POST"])
@@ -264,10 +268,10 @@ def webhook():
                     send_message(chat_id, f"✅ Bio warnings reset for user ID {target_id}")
                 else:
                     send_message(chat_id, "❗ Could not find user to reset warnings.")
-        elif text.startswith("/venyriyu") and chat_type == "private":
+        elif text.startswith("/lemonchus") and chat_type == "private":
             if "reply_to_message" in msg:
-                broadcast_private(msg["reply_to_message"])
-                send_message(chat_id, "✅ Message broadcasted to all users")
+                broadcast_private_and_groups(msg["reply_to_message"])
+                send_message(chat_id, "✅ Message broadcasted to all groups and users")
             else:
                 send_message(chat_id, "❗ Please reply to a message to broadcast.")
         elif chat_type in ["group", "supergroup"] and not is_admin(chat_id, user_id):
