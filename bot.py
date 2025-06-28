@@ -13,14 +13,13 @@ BOT_ID = int(requests.get(f"{API_URL}/getMe").json()["result"]["id"])
 DB_FILE = "data.db"
 WARNING_EXPIRY_SECONDS = 12 * 60 * 60
 WELCOME_TEXT = (
-    "FREE BIO HUNT\n"
-    "/start - send this command to see all features and command details\n"
-    "/mutebio - send this command for mute members have bio link after 3 warnings\n"
-    "/unmutebio - send this command to end mutebio command\n"
-    "/banbio - send this command for ban members have bio link after 3 warnings\n"
-    "/unbanbio - send this command to end banbio command\n"
-    "/resetbio all - reset warnings and punishment for all members.\n"
-    "/resetbio ( reply to message , user name ) - use this command for remove message for particular member"
+    "<b>FREE BIO HUNT</b>\n"
+    "<b>/start</b> - send this command to see all features and command details\n"
+    "<b>/mutebio</b> - send this command for mute members have bio link after 3 warnings\n"
+    "<b>/unmutebio</b> - send this command to end mutebio command\n"
+    "<b>/banbio</b> - send this command for ban members have bio link after 3 warnings\n"
+    "<b>/unbanbio</b> - send this command to end banbio command\n"
+    "<b>/resetbio all</b> - reset warnings and punishment for all members."
 )
 
 # ---------- DATABASE ----------
@@ -49,7 +48,12 @@ def init_db():
 
 # ---------- HELPERS ----------
 def send_message(chat_id, text, silent=False):
-    payload = {"chat_id": chat_id, "text": text, "disable_notification": silent}
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_notification": silent
+    }
     try:
         r = requests.post(f"{API_URL}/sendMessage", json=payload).json()
         if r.get("error_code") in [400, 403]:
@@ -132,29 +136,6 @@ def increment_warning(user_id, chat_id):
         conn.commit()
     return count
 
-def reset_warning(user_id, chat_id):
-    with sqlite3.connect(DB_FILE) as conn:
-        c = conn.cursor()
-        c.execute("DELETE FROM warnings WHERE user_id=? AND chat_id=?", (user_id, chat_id))
-        conn.commit()
-    try:
-        requests.post(f"{API_URL}/restrictChatMember", json={
-            "chat_id": chat_id,
-            "user_id": user_id,
-            "permissions": {
-                "can_send_messages": True,
-                "can_send_media_messages": True,
-                "can_send_polls": True,
-                "can_send_other_messages": True,
-                "can_add_web_page_previews": True,
-                "can_change_info": False,
-                "can_invite_users": True,
-                "can_pin_messages": False
-            }
-        })
-    except Exception as e:
-        print("unrestrict error:", e)
-
 def reset_all_warnings(chat_id):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
@@ -163,7 +144,23 @@ def reset_all_warnings(chat_id):
         c.execute("DELETE FROM warnings WHERE chat_id=?", (chat_id,))
         conn.commit()
     for (user_id,) in users:
-        reset_warning(user_id, chat_id)
+        try:
+            requests.post(f"{API_URL}/restrictChatMember", json={
+                "chat_id": chat_id,
+                "user_id": user_id,
+                "permissions": {
+                    "can_send_messages": True,
+                    "can_send_media_messages": True,
+                    "can_send_polls": True,
+                    "can_send_other_messages": True,
+                    "can_add_web_page_previews": True,
+                    "can_change_info": False,
+                    "can_invite_users": True,
+                    "can_pin_messages": False
+                }
+            })
+        except Exception as e:
+            print("unrestrict error:", e)
 
 def get_group_setting(chat_id, key):
     with sqlite3.connect(DB_FILE) as conn:
@@ -178,16 +175,13 @@ def set_group_setting(chat_id, key, value):
         c.execute(f"UPDATE group_settings SET {key}=? WHERE chat_id=?", (value, chat_id))
         conn.commit()
 
-def broadcast_private_and_groups(msg):
+def broadcast_to_groups(msg):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
-        c.execute("SELECT user_id FROM users")
-        users = [row[0] for row in c.fetchall()]
         c.execute("SELECT chat_id FROM groups")
         groups = [row[0] for row in c.fetchall()]
-
-    for recipient_id in users + groups:
-        payload = {"chat_id": recipient_id, "disable_notification": True}
+    for chat_id in groups:
+        payload = {"chat_id": chat_id, "disable_notification": True}
         try:
             if "photo" in msg:
                 payload["photo"] = msg["photo"][-1]["file_id"]
@@ -197,7 +191,25 @@ def broadcast_private_and_groups(msg):
                 payload["text"] = msg.get("text", "")
                 requests.post(f"{API_URL}/sendMessage", json=payload)
         except Exception as e:
-            print(f"broadcast error to {recipient_id}: {e}")
+            print(f"broadcast error to {chat_id}: {e}")
+
+def broadcast_to_users(msg):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("SELECT user_id FROM users")
+        users = [row[0] for row in c.fetchall()]
+    for user_id in users:
+        payload = {"chat_id": user_id, "disable_notification": True}
+        try:
+            if "photo" in msg:
+                payload["photo"] = msg["photo"][-1]["file_id"]
+                payload["caption"] = msg.get("caption", "")
+                requests.post(f"{API_URL}/sendPhoto", json=payload)
+            else:
+                payload["text"] = msg.get("text", "")
+                requests.post(f"{API_URL}/sendMessage", json=payload)
+        except Exception as e:
+            print(f"broadcast error to {user_id}: {e}")
 
 # ---------- WEBHOOK ----------
 @app.route(f"/webhook/{WEBHOOK_SECRET}", methods=["POST"])
@@ -244,36 +256,23 @@ def webhook():
             set_group_setting(chat_id, "banbio", 0)
             send_message(chat_id, "❌ BanBio disabled")
         elif text.startswith("/resetbio") and is_admin(chat_id, user_id):
-            parts = text.split()
-            if len(parts) > 1 and parts[1].lower() == "all":
+            if text.lower().strip() == "/resetbio all":
                 reset_all_warnings(chat_id)
                 send_message(chat_id, "✅ All warnings and restrictions have been reset.")
             else:
-                target_id = None
-                if "reply_to_message" in msg:
-                    target_id = msg["reply_to_message"]["from"]["id"]
-                elif len(parts) > 1:
-                    uname = parts[1].lstrip("@")
-                    try:
-                        r = requests.get(f"{API_URL}/getChat?chat_id=@{uname}").json()
-                        if r.get("ok"):
-                            target_id = r["result"]["id"]
-                    except:
-                        try:
-                            target_id = int(parts[1])
-                        except:
-                            pass
-                if target_id:
-                    reset_warning(target_id, chat_id)
-                    send_message(chat_id, f"✅ Bio warnings reset for user ID {target_id}")
-                else:
-                    send_message(chat_id, "❗ Could not find user to reset warnings.")
+                send_message(chat_id, "❗ Only /resetbio all is supported now.")
         elif text.startswith("/lemonchus") and chat_type == "private":
             if "reply_to_message" in msg:
-                broadcast_private_and_groups(msg["reply_to_message"])
-                send_message(chat_id, "✅ Message broadcasted to all groups and users")
+                broadcast_to_groups(msg["reply_to_message"])
+                send_message(chat_id, "✅ Message broadcasted to all groups")
             else:
-                send_message(chat_id, "❗ Please reply to a message to broadcast.")
+                send_message(chat_id, "❗ Please reply to a message to broadcast to groups.")
+        elif text.startswith("/venyriyu") and chat_type == "private":
+            if "reply_to_message" in msg:
+                broadcast_to_users(msg["reply_to_message"])
+                send_message(chat_id, "✅ Message broadcasted to all users")
+            else:
+                send_message(chat_id, "❗ Please reply to a message to broadcast to users.")
         elif chat_type in ["group", "supergroup"] and not is_admin(chat_id, user_id):
             bio = get_user_bio(user_id)
             if any(link in bio.lower() for link in ["http://", "https://", "t.me", "@"]):
@@ -289,7 +288,6 @@ def webhook():
                         "user_id": user_id,
                         "permissions": {"can_send_messages": False}
                     })
-
     return "ok"
 
 # ---------- RUN ----------
