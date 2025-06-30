@@ -83,6 +83,7 @@ def is_admin(chat_id, user_id):
         return False
 
 def save_group(chat_id):
+    print(f"Saving group: {chat_id}")
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("INSERT OR IGNORE INTO groups (chat_id) VALUES (?)", (chat_id,))
@@ -90,6 +91,7 @@ def save_group(chat_id):
         conn.commit()
 
 def save_user(user_id):
+    print(f"Saving user: {user_id}")
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
@@ -215,6 +217,8 @@ def broadcast_to_users(msg):
 @app.route(f"/webhook/{WEBHOOK_SECRET}", methods=["POST"])
 def webhook():
     data = request.get_json()
+    print("WEBHOOK RECEIVED:", data)
+
     if "message" in data:
         msg = data["message"]
         chat = msg["chat"]
